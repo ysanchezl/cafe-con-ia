@@ -1090,10 +1090,39 @@ function checkDownloads(){
   if(!window.claude||!window.claude.use){return;}
   window.claude.use('downloads').then(function(dl){if(!dl)hideDl();},function(){hideDl();});
 }
+var FB_URL='https://cafe-con-ia-default-rtdb.europe-west1.firebasedatabase.app';
+function fbShim(){
+  var uid=null;
+  try{uid=localStorage.getItem('barra-uid-v1');}catch(e){}
+  if(!uid){uid='p'+Date.now().toString(36)+Math.random().toString(36).slice(2,8);try{localStorage.setItem('barra-uid-v1',uid);}catch(e){}}
+  return {
+    user:{id:function(){return Promise.resolve(uid);}},
+    db:{
+      collection:function(name){return {orderBy:function(){return this;},limit:function(){return this;},
+        onSnapshot:function(ok,err){
+          var stopped=false;
+          function tick(){
+            if(stopped)return;
+            fetch(FB_URL+'/'+name+'.json',{cache:'no-store'}).then(function(r){if(!r.ok)throw new Error('http');return r.json();}).then(function(j){
+              j=j||{};
+              ok({docs:Object.keys(j).map(function(k){var v=j[k];return {id:k,data:function(){return v;}};}),metadata:{fromCache:false}});
+            }).catch(function(){if(err)err();}).then(function(){
+              if(!stopped)setTimeout(tick,(typeof inScreen!=='undefined'&&inScreen)?2500:7000);
+            });
+          }
+          tick();
+          return function(){stopped=true;};
+        }};},
+      doc:function(path){return {set:function(data){
+        return fetch(FB_URL+'/'+path+'.json',{method:'PUT',body:JSON.stringify(data)}).then(function(r){if(!r.ok){var e=new Error('http');e.code='revoked';throw e;}});
+      }};}
+    }
+  };
+}
 function initLive(){
   try{
-    if(!window.claude||!window.claude.use){setLive('off');return;}
-    Promise.all([window.claude.use('db'),window.claude.use('user')]).then(function(r){
+    var SH=fbShim();
+    Promise.all([Promise.resolve(SH.db),Promise.resolve(SH.user)]).then(function(r){
       var db=r[0],user=r[1];
       if(!db){setLive('off');return;}
       live.db=db;
@@ -1103,9 +1132,10 @@ function initLive(){
         db.collection('players').orderBy('points','desc').limit(200).onSnapshot(function(snap){
           realPlayers=snap.docs.map(function(d){var v=d.data()||{};
             return {id:d.id,nick:typeof v.nick==='string'?v.nick:'',points:isFinite(v.points)?Number(v.points):0,level:typeof v.level==='string'?v.level:''};});
+          if(live.mode==='off'){setLive('on');queueSync();}
           if(demo)return;
           players=realPlayers;detectEvents(snap.metadata&&snap.metadata.fromCache);renderBoard();
-        },function(){renderBoard();});
+        },function(){if(live.mode==='on')setLive('off');renderBoard();});
         setLive(uid?'on':'readonly');
         queueSync();
       });
