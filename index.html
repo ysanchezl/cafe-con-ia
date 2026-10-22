@@ -92,6 +92,7 @@ textarea{resize:vertical;line-height:1.5}
 .btn.gold{background:var(--gold);border-color:var(--gold);color:#1B1200}
 .btn.done{background:var(--ok-soft);border-color:var(--ok);color:var(--ok)}
 .btn[disabled]{opacity:.55;cursor:default}
+.lockhint{margin:6px 0 0}
 .btn:focus-visible,.m-head:focus-visible,input:focus-visible,textarea:focus-visible,summary:focus-visible{outline:3px solid var(--glow);outline-offset:2px}
 .btn .ico{width:18px;height:18px;fill:currentColor}
 .cp{display:inline-flex;align-items:center;gap:4px;font:600 13px/1 var(--f-mono)}
@@ -572,7 +573,7 @@ var MISSIONS=[
 ];
 
 /* ---------- estado ---------- */
-var S={nick:'',done:{},ans:{},wall:{prompt:'',use:''}};
+var S={nick:'',done:{},ans:{},copied:{},wall:{prompt:'',use:''}};
 try{
   var raw=localStorage.getItem(KEY);
   if(raw){var o=JSON.parse(raw);
@@ -580,6 +581,7 @@ try{
       S.nick=String(o.nick||'').slice(0,20);
       if(o.done&&typeof o.done==='object')S.done=o.done;
       if(o.ans&&typeof o.ans==='object')S.ans=o.ans;
+      if(o.copied&&typeof o.copied==='object')S.copied=o.copied;
       if(o.wall&&typeof o.wall==='object')S.wall={prompt:String(o.wall.prompt||''),use:String(o.wall.use||'')};
     }}
 }catch(e){}
@@ -660,9 +662,31 @@ function copyText(text,btn,node){
     }else done(false);
   }catch(e){done(false);}
 }
+/* El botón «ya lo he hecho» se activa al copiar el prompt */
+function setLock(btn,lock){
+  btn.disabled=lock;btn.classList.toggle('locked',lock);
+  var hn=btn.parentElement&&btn.parentElement.querySelector('.lockhint');if(hn)hn.hidden=!lock;
+}
+function unlockFor(from){
+  var n=from.parentElement;
+  while(n){
+    var ds=n.querySelectorAll('[data-done]');
+    if(ds.length){ds.forEach(function(d){S.copied[d.getAttribute('data-done')]=true;setLock(d,false);});save();return;}
+    n=n.parentElement;
+  }
+}
+function lockAll(){
+  $$('[data-done]').forEach(function(d){
+    var id=d.getAttribute('data-done');
+    if(S.done[id]||S.copied[id])return;
+    var n=d.parentElement,has=false;
+    while(n&&n.id!=='mlist'){if(n.querySelector('.cpb')){has=true;break;}n=n.parentElement;}
+    setLock(d,has);
+  });
+}
 function copyBtn(label,getText,node,ghost){
-  var b=h('button',{class:'btn'+(ghost?' ghost':''),type:'button'},ico('copy','ico'),h('span',{class:'lab',text:label}));
-  b.addEventListener('click',function(){copyText(getText(),b,node);});
+  var b=h('button',{class:'btn cpb'+(ghost?' ghost':''),type:'button'},ico('copy','ico'),h('span',{class:'lab',text:label}));
+  b.addEventListener('click',function(){copyText(getText(),b,node);unlockFor(b);});
   return b;
 }
 
@@ -696,8 +720,8 @@ function buildChecks(b){
 function buildDone(b){
   var btn=h('button',{class:'btn gold',type:'button','data-done':b.id,'data-lab':b.label,'aria-pressed':'false'},
     ico('check','ico'),h('span',{class:'lab',text:b.label}),cpEl(b.pts));
-  btn.addEventListener('click',function(){setDone(b.id,!S.done[b.id]);});
-  return h('div',null,btn);
+  btn.addEventListener('click',function(){if(btn.disabled)return;setDone(b.id,!S.done[b.id]);});
+  return h('div',null,btn,h('p',{class:'hint lockhint',hidden:true,text:'Copia el prompt y pruébalo en tu IA para poder marcarlo.'}));
 }
 function buildChoice(b){
   var wrap=h('div',{class:'panel'});
@@ -1156,6 +1180,7 @@ $('#join-form').addEventListener('submit',function(e){
   $('#join-err').textContent='';S.nick=v;save();enter();queueSync();
 });
 buildMissions();
+lockAll();
 $('#nick-in').value=S.nick;
 enter();
 renderBoard();
